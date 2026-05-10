@@ -42,6 +42,7 @@ const getCategoryLabel = (category) => categoryLabels[category] || category;
 function App() {
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
+  const speechWarmupRef = useRef(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingUrl, setRecordingUrl] = useState("");
   const [recordingError, setRecordingError] = useState("");
@@ -58,6 +59,7 @@ function App() {
   const [availableVoices, setAvailableVoices] = useState([]);
   const [selectedVoiceName, setSelectedVoiceName] = useState("");
   const [interviewerMode, setInterviewerMode] = useState(true);
+  const [lowLatencySpeech, setLowLatencySpeech] = useState(true);
   const [privateQuestions, setPrivateQuestions] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("privateQuestions") || "[]");
@@ -105,6 +107,24 @@ function App() {
   useEffect(() => {
     localStorage.setItem("privateQuestions", JSON.stringify(privateQuestions));
   }, [privateQuestions]);
+
+  useEffect(() => {
+    speechWarmupRef.current = false;
+  }, [selectedVoiceName, lowLatencySpeech]);
+
+  useEffect(() => {
+    const warmupOnFirstInteraction = () => {
+      prepareSpeechEngine();
+    };
+
+    window.addEventListener("pointerdown", warmupOnFirstInteraction, { once: true, capture: true });
+    window.addEventListener("keydown", warmupOnFirstInteraction, { once: true, capture: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", warmupOnFirstInteraction, { capture: true });
+      window.removeEventListener("keydown", warmupOnFirstInteraction, { capture: true });
+    };
+  }, [selectedVoiceName, availableVoices, lowLatencySpeech]);
 
   const handlePrivateQuestionChange = (field, value) => {
     setPrivateQuestionForm((current) => ({
@@ -247,14 +267,36 @@ function App() {
     setShowReferenceAnswer(false);
 
     if (autoSpeak) {
+      prepareSpeechEngine();
       setTimeout(() => {
         speakQuestion(nextQuestion.question);
-      }, 100);
+      }, 50);
     }
   };
 
   const stopCurrentSpeech = () => {
     window.speechSynthesis?.cancel();
+  };
+
+  const prepareSpeechEngine = () => {
+    if (speechWarmupRef.current || !window.speechSynthesis || !window.SpeechSynthesisUtterance) {
+      return;
+    }
+
+    const warmup = new SpeechSynthesisUtterance(".");
+    warmup.lang = "en-US";
+    warmup.rate = 1;
+    warmup.pitch = 1;
+    warmup.volume = 0;
+
+    const selectedVoice = availableVoices.find((voice) => voice.name === selectedVoiceName);
+    if (selectedVoice) {
+      warmup.voice = selectedVoice;
+      warmup.lang = selectedVoice.lang;
+    }
+
+    speechWarmupRef.current = true;
+    window.speechSynthesis.speak(warmup);
   };
 
   const speakQuestion = (text) => {
@@ -283,7 +325,10 @@ function App() {
   };
 
   const handleReplay = () => {
-    speakQuestion(currentQuestion?.question);
+    prepareSpeechEngine();
+    setTimeout(() => {
+      speakQuestion(currentQuestion?.question);
+    }, 50);
   };
 
   const getRecordingErrorMessage = (error) => {
@@ -381,6 +426,9 @@ function App() {
             <button
               className="rounded-md bg-teal-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-800"
               onClick={handleNextQuestion}
+              onFocus={prepareSpeechEngine}
+              onMouseEnter={prepareSpeechEngine}
+              onTouchStart={prepareSpeechEngine}
             >
               下一题
             </button>
@@ -442,6 +490,9 @@ function App() {
                   <button
                     className="rounded-md border border-teal-700 bg-white px-4 py-2 text-sm font-semibold text-teal-800 transition hover:bg-teal-50"
                     onClick={handleReplay}
+                    onFocus={prepareSpeechEngine}
+                    onMouseEnter={prepareSpeechEngine}
+                    onTouchStart={prepareSpeechEngine}
                   >
                     Replay 朗读
                   </button>
@@ -514,6 +565,18 @@ function App() {
                 />
               </span>
               <p className="mt-1 text-xs text-slate-500">开启后点击“下一题”会自动朗读新题目。</p>
+            </label>
+            <label className="block">
+              <span className="flex items-center justify-between gap-3 text-sm font-medium text-slate-700">
+                低延迟朗读
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-slate-300 text-teal-700 focus:ring-teal-600"
+                  checked={lowLatencySpeech}
+                  onChange={(event) => setLowLatencySpeech(event.target.checked)}
+                />
+              </span>
+              <p className="mt-1 text-xs text-slate-500">开启后使用浏览器默认语音路径，通常更快，但自然度可能略低。</p>
             </label>
             <label className="block">
               <span className="flex items-center justify-between gap-3 text-sm font-medium text-slate-700">
